@@ -1,94 +1,219 @@
-/* decryptFetch.js -> Takes the CID of previously encrypted data, fetches it from IPFS, and decrypts it using the secret key.
-*/
-// app/src/decryptFetch.js
-// app/src/decryptFetch.js
-import { create } from "ipfs-http-client";
-import { decryptVector, compareVectors } from "./encryption.js";
-import dotenv from "dotenv";
-dotenv.config();
+import { ethers, keccak256, toUtf8Bytes } from "ethers";
 
-const auth =
-  "Basic " +
-  Buffer.from(
-    process.env.INFURA_PROJECT_ID + ":" + process.env.INFURA_PROJECT_SECRET
-  ).toString("base64");
+// Create a notification system
+const showNotification = (message, isSuccess = true) => {
+  const notification = document.createElement('div');
+  notification.className = `eth-notification ${isSuccess ? 'success' : 'error'}`;
+  notification.innerHTML = `
+    <div class="eth-notification-icon">
+      ${isSuccess ? '✓' : '✕'}
+    </div>
+    <div class="eth-notification-content">
+      ${message}
+    </div>
+  `;
+  
+  document.body.appendChild(notification);
+  
+  // Auto-remove after 5 seconds
+  setTimeout(() => {
+    notification.classList.add('fade-out');
+    setTimeout(() => notification.remove(), 300);
+  }, 5000);
+};
 
-const ipfs = create({
-  host: "ipfs.infura.io", // Fixed the extra space here
-  port: 5001,
-  protocol: "https",
-  headers: { authorization: auth },
-});
+// Add this CSS to your main stylesheet
+const addNotificationStyles = () => {
+  const style = document.createElement('style');
+  style.textContent = `
+    .eth-notification {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 15px 25px;
+      border-radius: 8px;
+      color: white;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+      z-index: 10000;
+      transform: translateX(0);
+      transition: all 0.3s ease;
+      max-width: 350px;
+    }
+    
+    .eth-notification.success {
+      background: linear-gradient(135deg, #4CAF50, #2E7D32);
+      border-left: 5px solid #1B5E20;
+    }
+    
+    .eth-notification.error {
+      background: linear-gradient(135deg, #F44336, #C62828);
+      border-left: 5px solid #B71C1C;
+    }
+    
+    .eth-notification-icon {
+      font-size: 20px;
+      font-weight: bold;
+    }
+    
+    .eth-notification.fade-out {
+      transform: translateX(120%);
+      opacity: 0;
+    }
+    
+    @media (max-width: 768px) {
+      .eth-notification {
+        top: 10px;
+        right: 10px;
+        left: 10px;
+        max-width: calc(100% - 20px);
+      }
+    }
+  `;
+  document.head.appendChild(style);
+};
 
-// Get secret key from environment variables
-const secretKey = process.env.SECRET_KEY;
+// Add styles when module loads
+addNotificationStyles();
 
-/**
- * Fetch and decrypt a vector embedding from IPFS
- * @param {String} cid - The content identifier from IPFS
- * @returns {Object} - Decrypted data containing vector and metadata
- */
-export async function fetchAndDecrypt(cid) {
+const register = async (facialFeatures, cid) => {
   try {
-    let encrypted = "";
-
-    for await (const chunk of ipfs.cat(cid)) {
-      encrypted += chunk.toString();
+    console.log("registering");
+    if (!window.ethereum) {
+      showNotification("MetaMask not installed", false);
+      return false;
     }
 
-    const decrypted = decryptVector(encrypted, secretKey);
-    console.log("🔓 Decrypted Vector:", {
-      dimensions: decrypted.vector.length,
-      userId: decrypted.metadata?.userId || "unknown",
-      timestamp: decrypted.metadata?.timestamp || "unknown"
+    const quantized = facialFeatures.map((v) => v.toFixed(5));
+    const embeddingStr = quantized.join(",");
+
+    const facialFeaturesHash = keccak256(toUtf8Bytes(embeddingStr));
+    const cidHash = keccak256(toUtf8Bytes(cid));
+
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    provider.send("eth_requestAccounts", []);
+    const addresses = await provider.listAccounts();
+    const address = addresses[0].address;
+    console.log("Connected account:", address);
+    const signer = await provider.getSigner();
+
+    const contractABI = [
+      {
+        type: "function",
+        name: "getCIDHash",
+        inputs: [
+          {
+            name: "user",
+            type: "address",
+            internalType: "address",
+          },
+        ],
+        outputs: [
+          {
+            name: "",
+            type: "bytes32",
+            internalType: "bytes32",
+          },
+        ],
+        stateMutability: "view",
+      },
+      {
+        type: "function",
+        name: "getFacialFeatureHash",
+        inputs: [
+          {
+            name: "user",
+            type: "address",
+            internalType: "address",
+          },
+        ],
+        outputs: [
+          {
+            name: "",
+            type: "bytes32",
+            internalType: "bytes32",
+          },
+        ],
+        stateMutability: "view",
+      },
+      {
+        type: "function",
+        name: "register",
+        inputs: [
+          {
+            name: "facialFeatureHash",
+            type: "bytes32",
+            internalType: "bytes32",
+          },
+          {
+            name: "CIDHash",
+            type: "bytes32",
+            internalType: "bytes32",
+          },
+        ],
+        outputs: [],
+        stateMutability: "nonpayable",
+      },
+      {
+        type: "event",
+        name: "Registered",
+        inputs: [
+          {
+            name: "user",
+            type: "address",
+            indexed: true,
+            internalType: "address",
+          },
+          {
+            name: "facialFeatureHash",
+            type: "bytes32",
+            indexed: false,
+            internalType: "bytes32",
+          },
+          {
+            name: "CIDHash",
+            type: "bytes32",
+            indexed: false,
+            internalType: "bytes32",
+          },
+        ],
+        anonymous: false,
+      },
+      {
+        type: "error",
+        name: "Already_Registered",
+        inputs: [],
+      },
+      {
+        type: "error",
+        name: "Not_Registered",
+        inputs: [],
+      },
+    ];
+    const contractAddress = "0x16ab69Ed506F7F3aBFf5Ee3565e57A22C5f3c305";
+
+    const contract = new ethers.Contract(contractAddress, contractABI, signer);
+    const tx = await contract.register(facialFeaturesHash, cidHash);
+
+    const filterAppEventsByCaller = contract.filters.Registered(address);
+    contract.on(filterAppEventsByCaller, () => {
+      console.log("Registered successfully");
+      showNotification("User registered successfully on blockchain!", true);
+      return true;
     });
     
-    return decrypted;
-  } catch (err) {
-    console.error("❌ Decryption failed:", err.message);
-    throw err;
+    return true;
+  } catch (error) {
+    console.error(error);
+    const errorMsg = error.message.includes("Already_Registered") 
+      ? "This user is already registered" 
+      : `Registration failed: ${error.message}`;
+    console.error("Error shows");
+    showNotification(errorMsg, false);
+    return false;
   }
-}
+};
 
-/**
- * Authenticate a user by comparing their current face embedding with stored one
- * @param {String} cid - The content identifier of the stored embedding in IPFS
- * @param {Array} currentEmbedding - Current face embedding from ML model
- * @param {Number} threshold - Similarity threshold (0-1)
- * @returns {Object} - Authentication result
- */
-export async function authenticateUser(cid, currentEmbedding, threshold = 0.8) {
-  try {
-    // Fetch stored data
-    const storedData = await fetchAndDecrypt(cid);
-    const storedEmbedding = storedData.vector;
-    
-    // Compare embeddings
-    const comparisonResult = compareVectors(currentEmbedding, storedEmbedding, threshold);
-    
-    return {
-      authenticated: comparisonResult.match,
-      similarity: comparisonResult.similarity,
-      threshold: comparisonResult.threshold,
-      userId: storedData.metadata?.userId || "unknown",
-      timestamp: new Date().toISOString()
-    };
-  } catch (err) {
-    console.error("❌ Authentication failed:", err.message);
-    return {
-      authenticated: false,
-      error: err.message
-    };
-  }
-}
-
-// For direct command line usage
-if (import.meta.url.endsWith(process.argv[1])) {
-  const cid = process.argv[2] || "REPLACE_WITH_YOUR_CID";
-  // Sample vector for testing - replace with your ML vector
-  const currentEmbedding = Array(128).fill(0).map(() => Math.random());
-  
-  authenticateUser(cid, currentEmbedding)
-    .then(result => console.log("Authentication result:", result))
-    .catch(err => console.error("Error:", err));
-}
+export default register;

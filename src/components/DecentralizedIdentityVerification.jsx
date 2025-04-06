@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Check, ArrowRight } from "lucide-react";
+import { Check, ArrowRight, X } from "lucide-react";
 import { uploadToIpfs } from "../utils/encryptUpload";
 import axios from "axios";
 import "./DecentralizedIdentityVerification.css";
@@ -7,12 +7,15 @@ import "./DecentralizedIdentityVerification.css";
 const DecentralizedIdentityVerification = () => {
   const [photoID, setPhotoID] = useState(null);
   const [idFile, setIdFile] = useState(null);
+  const [registrationStatus, setRegistrationStatus] = useState(false);
+  const [showPopup, setShowPopup] = useState(false);
+  const [popupMessage, setPopupMessage] = useState("");
 
   const handleUploadID = (e) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      setIdFile(file); // Store the actual file object
-      setPhotoID(URL.createObjectURL(file)); // Create URL for preview
+      setIdFile(file);
+      setPhotoID(URL.createObjectURL(file));
     }
   };
 
@@ -33,14 +36,46 @@ const DecentralizedIdentityVerification = () => {
       });
 
       console.log("Server Response:", response.data);
-      await uploadToIpfs(response.data.embedding, null);
+      const status = await uploadToIpfs(response.data.embedding, null);
+
+      if (status && status.success) {
+        setRegistrationStatus(true);
+        setPopupMessage("User registered successfully!");
+      } else {
+        setPopupMessage("User not registered");
+      }
+      setShowPopup(true);
+      
+      // Hide popup after 3 seconds
+      setTimeout(() => {
+        setShowPopup(false);
+      }, 3000);
     } catch (error) {
       console.error("Upload failed:", error);
+      setPopupMessage("Registration failed: " + error.message);
+      setShowPopup(true);
+      setTimeout(() => {
+        setShowPopup(false);
+      }, 3000);
     }
   };
 
   return (
     <div className="verification-panel">
+      {/* Popup Notification */}
+      {showPopup && (
+        <div className={`popup-notification ${registrationStatus ? "success" : "error"}`}>
+          <div className="popup-content">
+            {registrationStatus ? (
+              <Check size={20} className="popup-icon" />
+            ) : (
+              <X size={20} className="popup-icon" />
+            )}
+            <span>{popupMessage}</span>
+          </div>
+        </div>
+      )}
+
       <div className="step-content">
         <h3 className="step-title">Upload Photo ID</h3>
         <p className="step-description">
